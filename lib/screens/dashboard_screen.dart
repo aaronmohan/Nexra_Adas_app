@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 import '../providers/adas_state.dart';
 import '../services/auth_service.dart';
 import 'adas_camera_screen.dart';
-
+import '../services/emergency_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -16,6 +18,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen>
     with SingleTickerProviderStateMixin {
   final AuthService _authService = AuthService();
+  final EmergencyService _emergencyService = EmergencyService();
   //bool _adasActive = false;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -129,6 +132,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                 sliver: SliverList(
                   delegate: SliverChildListDelegate([
                     _buildStatusCard(theme),
+                    const SizedBox(height: 28),
+                    _buildEmergencyButton(theme),
+
                     const SizedBox(height: 28),
                     _buildSectionHeader(theme),
                     const SizedBox(height: 16),
@@ -409,6 +415,100 @@ class _DashboardScreenState extends State<DashboardScreen>
       },
     );
   }
+
+Widget _buildEmergencyButton(_AppTheme theme) {
+  return GestureDetector(
+    onTap: () async {
+
+      final currentUser = FirebaseAuth.instance.currentUser;
+
+if (currentUser == null) return;
+
+final userDoc = await FirebaseFirestore.instance
+    .collection('users')
+    .doc(currentUser.uid)
+    .get();
+
+final emergencyNumber =
+    userDoc.data()?['emergencyContact'];
+
+if (emergencyNumber == null ||
+    emergencyNumber.toString().isEmpty) {
+
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text("No emergency contact found"),
+      backgroundColor: Colors.red,
+    ),
+  );
+
+  return;
+}
+
+      final success =
+          await _emergencyService.sendEmergencyAlert(
+        emergencyNumber,
+      );
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? "Emergency SMS opened"
+                : "Failed to send emergency alert",
+          ),
+          backgroundColor:
+              success ? Colors.green : Colors.red,
+        ),
+      );
+    },
+
+    child: Container(
+      height: 80,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFFDC2626),
+            Color(0xFFB91C1C),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(22),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.red.withOpacity(0.35),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.sos_rounded,
+            color: Colors.white,
+            size: 34,
+          ),
+
+          SizedBox(width: 14),
+
+          Text(
+            "EMERGENCY SOS",
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
 
   Widget _buildCameraButton(_AppTheme theme) {
     return GestureDetector(

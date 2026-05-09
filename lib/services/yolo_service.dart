@@ -9,7 +9,7 @@ class YoloService {
 
   Future<void> loadModel() async {
     _interpreter = await Interpreter.fromAsset(
-      "assets/ml_models/yolov8n_int8.tflite",
+      "assets/ml_models/yolov8n.tflite",
     );
     _loaded = true;
     print("YOLO model loaded");
@@ -23,14 +23,20 @@ class YoloService {
     final input = YoloPreprocessor.process(image);
 
     var output =
-        List.generate(1, (_) => List.generate(8400, (_) => List.filled(84, 0.0)));
+        List.generate(1, (_) => List.generate(84, (_) => List.filled(8400, 0.0)));
 
     _interpreter.run(input, output);
 
-    return YoloPostProcessor.process(
-      output[0],
-      image.width,
-      image.height,
-    );
+    // 🔁 TRANSPOSE OUTPUT (VERY IMPORTANT)
+final transposed = List.generate(
+  8400,
+  (i) => List.generate(22, (j) => output[0][j][i]),
+);
+
+return YoloPostProcessor.process(
+  transposed,
+  image.width,
+  image.height,
+);
   }
 }

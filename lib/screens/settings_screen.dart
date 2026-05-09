@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import '../providers/adas_state.dart';
 import '../services/auth_service.dart';
 import '../screens/edit_profile_screen.dart';
 
@@ -16,11 +18,11 @@ class _SettingsScreenState extends State<SettingsScreen>
   String _userName = "Driver";
 
   // ADAS toggles
-  bool _enableLaneDetection = true;
-  bool _enableCollisionWarning = true;
-  bool _enableDrowsinessDetection = true;
-  bool _enableTrafficSignRecognition = true;
-  bool _enablePotholeDetection = true;
+  //bool _enableLaneDetection = true;
+  //bool _enableCollisionWarning = true;
+  //bool _enableDrowsinessDetection = true;
+  //bool _enableTrafficSignRecognition = true;
+  //bool _enablePotholeDetection = true;
 
   // App toggles
   bool _enableBackgroundProcessing = true;
@@ -63,6 +65,7 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   @override
   Widget build(BuildContext context) {
+    final adas = context.watch<AdasState>();
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final theme = _SettingsTheme(isDark: isDark);
 
@@ -98,9 +101,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                           iconColor: const Color(0xFF3B82F6),
                           title: 'Lane Detection',
                           subtitle: 'Alert when drifting from lane',
-                          value: _enableLaneDetection,
+                          value: adas.laneEnabled, 
                           theme: theme,
-                          onChanged: (v) => setState(() => _enableLaneDetection = v),
+                          onChanged: (v) => adas.setLane(v),
                         ),
                         _Separator(theme: theme),
                         _SettingsTile(
@@ -108,9 +111,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                           iconColor: const Color(0xFFEF4444),
                           title: 'Collision Warning',
                           subtitle: 'Alert when too close to vehicle ahead',
-                          value: _enableCollisionWarning,
+                          value: adas.collisionEnabled,
                           theme: theme,
-                          onChanged: (v) => setState(() => _enableCollisionWarning = v),
+                          onChanged: (v) => adas.setCollision(v),
                         ),
                         _Separator(theme: theme),
                         _SettingsTile(
@@ -118,9 +121,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                           iconColor: const Color(0xFF8B5CF6),
                           title: 'Drowsiness Detection',
                           subtitle: 'Monitor driver alertness levels',
-                          value: _enableDrowsinessDetection,
+                          value: adas.drowsinessEnabled,
                           theme: theme,
-                          onChanged: (v) => setState(() => _enableDrowsinessDetection = v),
+                          onChanged: (v) => adas.setDrowsiness(v),
                         ),
                         _Separator(theme: theme),
                         _SettingsTile(
@@ -128,9 +131,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                           iconColor: const Color(0xFFF59E0B),
                           title: 'Traffic Sign Recognition',
                           subtitle: 'Identify and display road signs',
-                          value: _enableTrafficSignRecognition,
+                          value: adas.trafficSignEnabled,
                           theme: theme,
-                          onChanged: (v) => setState(() => _enableTrafficSignRecognition = v),
+                          onChanged: (v) => adas.setTrafficSign(v),
                         ),
                         _Separator(theme: theme),
                         _SettingsTile(
@@ -138,9 +141,9 @@ class _SettingsScreenState extends State<SettingsScreen>
                           iconColor: const Color(0xFFEC4899),
                           title: 'Pothole Detection',
                           subtitle: 'Detect and record road hazards',
-                          value: _enablePotholeDetection,
+                          value: adas.potholeEnabled,
                           theme: theme,
-                          onChanged: (v) => setState(() => _enablePotholeDetection = v),
+                          onChanged: (v) => adas.setPothole(v),
                         ),
                       ],
                     ),

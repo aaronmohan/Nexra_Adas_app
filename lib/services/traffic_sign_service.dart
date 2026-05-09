@@ -1,77 +1,191 @@
+import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
-import '../models/traffic_sign_detection.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 class TrafficSignService {
 
-  TrafficSignDetection? detectTrafficSign(img.Image image) {
+  Interpreter? _interpreter;
+
+  List<String> _labels = [];
+
+  String? _lastLabel;
+
+  int _stableCount = 0;
+
+  final int inputSize = 32;
+
+  // ================= INIT =================
+
+  Future<void> init() async {
+
+    _interpreter = await Interpreter.fromAsset(
+      'assets/ml_models/traffic_signs.tflite',
+    );
+
+    final labelData =
+        await rootBundle.loadString(
+      'assets/labels/labels.txt',
+    );
+
+    _labels = labelData
+        .split('\n')
+        .where((e) => e.trim().isNotEmpty)
+        .toList();
+
+    print("Labels count: ${_labels.length}");
+  }
+
+  // ================= SIGN EXTRACTION =================
+
+  img.Image? extractSign(img.Image image) {
 
     int minX = image.width;
     int minY = image.height;
+
     int maxX = 0;
     int maxY = 0;
 
-    int colorPixelCount = 0;
-    String label = "";
+    int redPixels = 0;
 
-    for (int y = 0; y < image.height; y += 3) {
-      for (int x = 0; x < image.width; x += 3) {
+    for (int y = 0; y < image.height; y += 2) {
+
+      for (int x = 0; x < image.width; x += 2) {
 
         final pixel = image.getPixel(x, y);
 
-        int r = pixel.r.toInt();
-        int g = pixel.g.toInt();
-        int b = pixel.b.toInt();
+        final r = pixel.r.toInt();
+        final g = pixel.g.toInt();
+        final b = pixel.b.toInt();
 
-        bool detectedColor = false;
+        // Detect red traffic sign area
+        if (r > 150 && g < 120 && b < 120) {
 
-        if (_isRed(r, g, b)) {
-          label = "STOP / PROHIBITION";
-          detectedColor = true;
-        } 
-        else if (_isYellow(r, g, b)) {
-          label = "WARNING SIGN";
-          detectedColor = true;
-        } 
-        else if (_isBlue(r, g, b)) {
-          label = "INFORMATION SIGN";
-          detectedColor = true;
-        }
-
-        if (detectedColor) {
-
-          colorPixelCount++;
+          redPixels++;
 
           if (x < minX) minX = x;
           if (y < minY) minY = y;
+
           if (x > maxX) maxX = x;
           if (y > maxY) maxY = y;
         }
       }
     }
 
-    if (colorPixelCount > 200) {
+    print("Red pixels: $redPixels");
 
-      return TrafficSignDetection(
-        x: minX.toDouble(),
-        y: minY.toDouble(),
-        width: (maxX - minX).toDouble(),
-        height: (maxY - minY).toDouble(),
-        label: label,
-      );
+    // No sign detected
+    if (redPixels < 300) {
+      return null;
     }
 
-    return null;
+    // Prevent invalid crop
+    if ((maxX - minX) <= 0 || (maxY - minY) <= 0) {
+      return null;
+    }
+
+    // Crop detected sign region
+    return img.copyCrop(
+      image,
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY,
+    );
   }
 
-  bool _isRed(int r, int g, int b) {
-    return r > 180 && g < 100 && b < 100;
+  // ================= CLASSIFICATION =================
+
+  String? detect(img.Image image) {
+
+    if (_interpreter == null) return null;
+
+    // Resize to model input size
+    final resized = img.copyResize(
+      image,
+      width: inputSize,
+      height: inputSize,
+    );
+
+    // Prepare input tensor
+    final input = List.generate(
+      1,
+      (_) => List.generate(
+        inputSize,
+        (y) => List.generate(
+          inputSize,
+          (x) {
+
+            final pixel = resized.getPixel(x, y);
+
+            return [
+              pixel.r / 255.0,
+              pixel.g / 255.0,
+              pixel.b / 255.0,
+            ];
+          },
+        ),
+      ),
+    );
+
+    // Output tensor
+    final output = List.generate(
+      1,
+      (_) => List.filled(43, 0.0),
+    );
+
+    _interpreter!.run(input, output);
+
+    // Find highest confidence
+    double maxScore = 0;
+
+    int maxIndex = 0;
+
+    for (int i = 0; i < 43; i++) {
+
+      if (output[0][i] > maxScore) {
+
+        maxScore = output[0][i];
+
+        maxIndex = i;
+      }
+    }
+
+    print("Confidence: $maxScore");
+
+    // Ignore weak predictions
+    if (maxScore < 0.90) {
+      return null;
+    }
+
+    final detectedLabel =
+    _labels[maxIndex]
+        .replaceAll(RegExp(r'^\\d+\\s'), '');
+
+    print("Detected Sign: $detectedLabel");
+
+    // Stability filter
+    if (_lastLabel == detectedLabel) {
+
+      _stableCount++;
+
+    } else {
+
+      _stableCount = 0;
+
+      _lastLabel = detectedLabel;
+    }
+
+    // Require stable prediction
+    if (_stableCount < 3) {
+      return null;
+    }
+
+    return detectedLabel;
   }
 
-  bool _isYellow(int r, int g, int b) {
-    return r > 180 && g > 180 && b < 100;
-  }
+  // ================= DISPOSE =================
 
-  bool _isBlue(int r, int g, int b) {
-    return b > 150 && r < 120 && g < 120;
+  void dispose() {
+    _interpreter?.close();
   }
 }

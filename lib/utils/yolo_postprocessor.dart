@@ -85,58 +85,60 @@ class YoloPostProcessor {
 
   /// Main function
   static List<Detection> process(
-      List<List<double>> output,
-      int imageWidth,
-      int imageHeight) {
+    List<List<double>> output,
+    int imageWidth,
+    int imageHeight) {
 
-    List<Detection> detections = [];
+  List<Detection> detections = [];
 
-    for (final row in output) {
-      double objectness = row[4];
-      if (objectness < confidenceThreshold) continue;
+  for (final row in output) {
+    if (row.length < 22) continue;
 
-      // Find best class
-      double maxClassScore = 0;
-      int classId = -1;
+    double cx = row[0];
+    double cy = row[1];
+    double w = row[2];
+    double h = row[3];
 
-      for (int i = 0; i < numClasses; i++) {
-        if (row[5 + i] > maxClassScore) {
-          maxClassScore = row[5 + i];
-          classId = i;
-        }
+    double objectness = row[4];
+
+    if (objectness < confidenceThreshold) continue;
+
+    double maxClassScore = 0;
+    int classId = -1;
+
+    for (int i = 0; i < numClasses; i++) {
+      double classScore = row[5 + i];
+      if (classScore > maxClassScore) {
+        maxClassScore = classScore;
+        classId = i;
       }
-
-      double score = objectness * maxClassScore;
-      if (score < confidenceThreshold) continue;
-
-      // YOLO format → pixel coords
-      double cx = row[0];
-      double cy = row[1];
-      double w = row[2];
-      double h = row[3];
-
-      double x1 = (cx - w / 2) * imageWidth / inputSize;
-      double y1 = (cy - h / 2) * imageHeight / inputSize;
-      double x2 = (cx + w / 2) * imageWidth / inputSize;
-      double y2 = (cy + h / 2) * imageHeight / inputSize;
-      final box = Box(x1, y1, x2, y2);
-
-      
-      detections.add(
-        Detection(
-          x1: x1,
-          y1: y1,
-          x2: x2,
-          y2: y2,
-          box: box,
-          classId: classId,
-          score: score,
-        ),
-      );
     }
 
-    return _nms(detections);
+    double score = objectness * maxClassScore;
+    if (score < confidenceThreshold) continue;
+
+    double x1 = (cx - w / 2) * imageWidth / inputSize;
+    double y1 = (cy - h / 2) * imageHeight / inputSize;
+    double x2 = (cx + w / 2) * imageWidth / inputSize;
+    double y2 = (cy + h / 2) * imageHeight / inputSize;
+
+    final box = Box(x1, y1, x2, y2);
+
+    detections.add(
+      Detection(
+        x1: x1,
+        y1: y1,
+        x2: x2,
+        y2: y2,
+        box: box,
+        classId: classId,
+        score: score,
+      ),
+    );
   }
+
+  return _nms(detections);
+}
 
   /// Non-Max Suppression
   static List<Detection> _nms(List<Detection> boxes) {

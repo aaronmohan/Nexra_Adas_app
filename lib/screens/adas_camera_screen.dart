@@ -1,6 +1,7 @@
 
 
-
+import 'package:provider/provider.dart';
+import '../providers/adas_state.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:provider/provider.dart';
@@ -21,7 +22,13 @@ import '../models/traffic_sign_detection.dart';
 import '../services/drowsiness_detection_service.dart';
 import '../widgets/adas_overlay.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
-import '../utils/yolo_decoder.dart';
+//import '../utils/yolo_decoder.dart';
+import '../services/yolo_service.dart';
+//import '../utils/yolo_preprocessor.dart';
+import '../utils/image_converter.dart';
+import '../utils/yolo_postprocessor.dart';
+
+
 
 class ADASCameraScreen extends StatefulWidget {
   const ADASCameraScreen({super.key});
@@ -34,6 +41,8 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
     with WidgetsBindingObserver {
 
   CameraController? _cameraController;
+  String? _detectedSign;
+  DateTime? _lastSignTime;
   bool _isCameraInitialized = false;
   bool _servicesInitialized = false;
   bool _isProcessing = false;
@@ -46,6 +55,7 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
   // Drowsiness detection
   late DrowsinessService _drowsinessService;
   bool _isDrowsy = false;
+  bool _wasDrowsy = false;
   List<Face> _faces = [];
 
   // ⚡ Performance control
@@ -58,7 +68,7 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
   
 
   //late final AudioPlayer _audioPlayer;
-
+  late YoloService yoloService;
   late final AudioPlayer _lanePlayer;
   late final AudioPlayer _collisionPlayer;
 
@@ -68,18 +78,26 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
   bool _collisionSoundPlaying = false;
   CollisionLevel _lastCollisionLevel = CollisionLevel.safe;//newly added for warning alert
 
-  final TrafficSignService trafficSignService = TrafficSignService();
+  final TrafficSignService _trafficService = TrafficSignService();
 
   bool trafficSignDetected = false;
   int frameCount = 0;
 
-  final LightCollisionService lightCollisionService = LightCollisionService();
+  
+
+//FeatureMode currentMode = FeatureMode.lane;
+
+  //late YoloPreprocessor yoloPreprocessor;
 
   @override
   void initState() {
     super.initState();
+    _trafficService.init();
     WidgetsBinding.instance.addObserver(this);
 
+    yoloService = YoloService();
+   // yoloPreprocessor = YoloPreprocessor();
+    yoloService.loadModel();
     //_audioPlayer = AudioPlayer();
     _lanePlayer = AudioPlayer();
     _collisionPlayer = AudioPlayer();
@@ -109,7 +127,7 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
     _selectedCameraIndex = 1; //front camera by default
     _cameraController = CameraController(
       _cameras![_selectedCameraIndex],
-      ResolutionPreset.medium,
+      ResolutionPreset.low,
       enableAudio: false,
     );
 
@@ -165,118 +183,219 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
   }
 
   Future<void> _processFrame(CameraImage image) async {
-    if (!_servicesInitialized) return;
+  if (!_servicesInitialized) return;
 
-          // DROWSINESS DETECTION (ONLY FRONT CAMERA)
-          print("Processing drowsiness frame...");
-      if (_isFrontCamera) {
-        print("Front camera: $_isFrontCamera");
-      _drowsinessFrameSkip++;
+  final adas = context.read<AdasState>();
 
-  if (_drowsinessFrameSkip % 2 == 0) {
+  frameCount++;
 
-    final img.Image convertedImage = _convertYUV420toImage(image);
+  // If system OFF → do nothing
+  if (!adas.isActive) return;
 
-    // Save to temporary file
-    final directory = await getTemporaryDirectory();
-    final path = '${directory.path}/frame.jpg';
+  // Convert once for YOLO
+  final imgImage = convertCameraImage(image);
 
-    File(path).writeAsBytesSync(img.encodeJpg(convertedImage));
+  // OBJECT DETECTION (YOLO)
+  List<Detection> detections = [];
+  if (adas.collisionEnabled || adas.trafficSignEnabled) {
+    detections = await yoloService.detect(imgImage);
 
-    // Create ML Kit input
-    final inputImage = InputImage.fromFilePath(path);
+    // Example usage (you can modify this)
+    for (final obj in detections) {
+      final classId = obj.classId;
+      final confidence = obj.score;
 
-    // Detect faces
-    final faces = await _drowsinessService.detectFaces(inputImage);
+      final x1 = obj.x1;
+      final y1 = obj.y1;
+      final x2 = obj.x2;
+      final y2 = obj.y2;
 
-    print("Faces detected: ${faces.length}");
+      final width = x2 - x1;
+      final height = y2 - y1;
 
-    setState(() {
-      _faces = faces;
-    });
+      // Debug print
+      print("Detected: class=$classId conf=$confidence");
+    }
+  }
 
-    final drowsy =
-        _drowsinessService.checkDrowsiness(faces);
+  // 😴 DROWSINESS (front camera only)
+  if (_isFrontCamera && adas.drowsinessEnabled) {
+    if (frameCount % 3 == 0) {
+      await _runDrowsiness(image); // CameraImage ✅
+    }
+    return;
+  }
 
-    setState(() {
-      _isDrowsy = drowsy;
-    });
-    print("Faces detected: ${faces.length}");
-    
-    if (drowsy) {
-      print("🚨 DROWSINESS ALERT");
+  // 🚗 LANE DETECTION (CameraImage)
+  if (adas.laneEnabled) {
+    await _runLane(image); // ✅ FIXED
+  }
 
+  // 🚨 COLLISION (CameraImage)
+  if (adas.collisionEnabled && frameCount % 3 == 0) {
+    await _runCollision(image);
+  }
+
+  // 🚸 TRAFFIC SIGN (CameraImage)
+  if (adas.trafficSignEnabled && frameCount % 5 == 0) {
+    await _runTrafficSign(image);
+  }
+}
+
+Future<void> _runLane(CameraImage image) async {
+  final laneService = context.read<LaneDetectionService>();
+
+  final result = await laneService.detectLanes(image);
+
+  setState(() {
+    _laneDetected = result;
+    _laneDepartureDetected = laneService.laneDepartureDetected;
+    _laneOffset = laneService.lastOffset;
+  });
+
+  if (_laneDepartureDetected) {
+    await _playBeep();
+  }
+}
+
+Future<void> _runDrowsiness(CameraImage image) async {
+  final inputImage = _convertToInputImage(image);
+
+  final faces = await _drowsinessService.detectFaces(inputImage);
+
+  setState(() {
+    _faces = faces;
+  });
+
+  final drowsy = _drowsinessService.checkDrowsiness(faces);
+
+  setState(() {
+    _isDrowsy = drowsy;
+  });
+
+  /// ✅ TRIGGER ALERT ONLY ON CHANGE
+    if (drowsy && !_wasDrowsy) {
+      await _lanePlayer.stop(); // ensure clean playback
       await _lanePlayer.play(
         AssetSource("sounds/warn.mp3"),
         volume: 1.0,
       );
+    } else if (!drowsy && _wasDrowsy) {
+      await _lanePlayer.stop();
+    } 
+
+    _wasDrowsy = drowsy;
+}
+
+Future<void> _runCollision(CameraImage image) async {
+  final adas = context.read<AdasState>();
+
+  if (!adas.collisionEnabled) return;
+
+  final imgImage = convertCameraImage(image);
+  final detections = await yoloService.detect(imgImage);
+
+  bool collision = false;
+
+  for (var obj in detections) {
+    final classId = obj.classId;
+    final confidence = obj.score;
+
+    final x1 = obj.x1;
+    final y1 = obj.y1;
+    final x2 = obj.x2;
+    final y2 = obj.y2;
+
+final width = x2 - x1;
+final height = y2 - y1;
+
+    // 🚗 Vehicle classes (COCO)
+    if (classId == 2 || classId == 5 || classId == 7) {
+      if (width > 0.35) {
+        collision = true;
+        break;
+      }
     }
+  }
+
+  // 🚨 Trigger alert
+  if (collision) {
+    await _collisionPlayer.play(
+      AssetSource("sounds/warn.mp3"),
+    );
+  } else {
+    await _collisionPlayer.stop();
   }
 }
 
-    print("Frame processing...");
+Future<void> _runTrafficSign(CameraImage image) async {
 
-    final laneService = context.read<LaneDetectionService>();
-    final collisionService = context.read<CollisionLogicService>();
-    final laneResult = await laneService.detectLanes(image);
-    print("Lane result: $laneResult");
-    print("Departure: ${laneService.laneDepartureDetected}");
+  print("TRAFFIC FUNCTION CALLED");
 
-    if (!mounted) return;
+  // Convert camera image
+  final convertedImage =
+      _convertYUV420toImage(image);
 
-    setState(() {
-      _laneDetected = laneResult;
-      _laneDepartureDetected = laneService.laneDepartureDetected;
-      _laneOffset = laneService.lastOffset;
-    });
+  print(
+    "Image size: ${convertedImage.width} x ${convertedImage.height}",
+  );
 
-    if (_laneDepartureDetected) {
-      await _playBeep();
+  // STEP 1 → Extract sign region
+  final croppedSign =
+      _trafficService.extractSign(convertedImage);
+
+  // No sign region found
+  if (croppedSign == null) {
+
+    // Keep old label visible for 3 seconds
+    if (_lastSignTime != null &&
+        DateTime.now().difference(_lastSignTime!) <
+            const Duration(seconds: 3)) {
+
+      return;
     }
 
-   
-     
-      // Process only every 5th frame to keep app fast
-        /// Run traffic sign detection every 5 frames
-        frameCount++;
+    setState(() {
+      _detectedSign = null;
+    });
 
-        if (frameCount % 5 == 0) {
-
-          print("Running traffic sign detection");
-          img.Image convertedImage = _convertYUV420toImage(image);
-
-          TrafficSignDetection? detection =
-            trafficSignService.detectTrafficSign(convertedImage);
-
-        setState(() {
-          _trafficSign = detection;
-        });
-        }
-
-        ///collision
-
-      img.Image convertedImage = _convertYUV420toImage(image);
-
-      bool collisionDetected =
-          lightCollisionService.detectCollision(convertedImage);
-
-      if (collisionDetected) {
-
-        print("⚠ Object too close");
-
-        await _collisionPlayer.setReleaseMode(ReleaseMode.loop);
-
-        await _collisionPlayer.play(
-          AssetSource("sounds/warn.mp3"),
-          volume: 1.0,
-        );
-
-      } else if(!collisionDetected && _collisionSoundPlaying) {
-        _collisionSoundPlaying = false;
-        await _collisionPlayer.stop();
-
-      }
+    return;
   }
+
+  print(
+    "Sign cropped: ${croppedSign.width} x ${croppedSign.height}",
+  );
+
+  // STEP 2 → Classify cropped sign
+  final result =
+      _trafficService.detect(croppedSign);
+
+  // STEP 3 → Update UI
+  if (result != null) {
+
+    _lastSignTime = DateTime.now();
+
+    setState(() {
+      _detectedSign = result;
+    });
+
+  } else {
+
+    // Keep label visible briefly
+    if (_lastSignTime != null &&
+        DateTime.now().difference(_lastSignTime!) <
+            const Duration(seconds: 3)) {
+
+      return;
+    }
+
+    setState(() {
+      _detectedSign = null;
+    });
+  }
+
+  print("Detected Sign: $result");
+}
 
   Future<void> _playBeep() async {
       await _lanePlayer.setReleaseMode(ReleaseMode.stop);
@@ -452,33 +571,51 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
   ),
 
 
+
           /// TRAFFIC SIGN BOUNDING BOX
-      if (_trafficSign != null)
-        Positioned(
-          left: _trafficSign!.x,
-          top: _trafficSign!.y,
-          child: Container(
-            width: _trafficSign!.width,
-            height: _trafficSign!.height,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.red, width: 3),
-            ),
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: Container(
-                color: Colors.red,
-                padding: const EdgeInsets.all(4),
-                child: Text(
-                  _trafficSign!.label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                  ),
-                ),
+      if (_detectedSign != null)
+  Positioned(
+    top: 120,
+    left: 20,
+    right: 20,
+    child: Container(
+      padding: const EdgeInsets.symmetric(
+        vertical: 14,
+        horizontal: 18,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.orange,
+          width: 2,
+        ),
+      ),
+      child: Row(
+        children: [
+
+          const Icon(
+            Icons.traffic,
+            color: Colors.orange,
+            size: 30,
+          ),
+
+          const SizedBox(width: 12),
+
+          Expanded(
+            child: Text(
+              "SIGN: $_detectedSign",
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ),
-        ),
+        ],
+      ),
+    ),
+  ),
 
 
           ADASOverlay(
@@ -487,7 +624,7 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
             laneOffset: _laneOffset,
             //collisionWarning: null,
             drowsinessDetected: _isDrowsy,
-            trafficSignDetected: _trafficSign != null ? "Traffic Sign Detected" : null,
+            trafficSignDetected: _detectedSign,
             potholeDetected: false,
             isDriverFacing: false,
           ),
@@ -537,32 +674,36 @@ class _ADASCameraScreenState extends State<ADASCameraScreen>
         },
       ),
 
-          /// Camera Switch Button 
-      Positioned(
-        bottom: 100,
-        right: 20,
-        child: FloatingActionButton(
-          onPressed: _switchCamera,
-          child: const Icon(Icons.cameraswitch),
-        ),
-      ),
+         /// Camera Switch Button
+Positioned(
+  bottom: 100,
+  right: 20,
+  child: FloatingActionButton(
+    heroTag: "switchCameraBtn",
+    onPressed: _switchCamera,
+    child: const Icon(Icons.cameraswitch),
+  ),
+),
 
-      /// Back Button
-      Positioned(
-        bottom: 30,
-        left: 0,
-        right: 0,
-        child: Center(
-          child: FloatingActionButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Icon(Icons.arrow_back),
-          ),
-        ),
-      ),
+/// Back Button
+Positioned(
+  bottom: 30,
+  left: 0,
+  right: 0,
+  child: Center(
+    child: FloatingActionButton(
+      heroTag: "backBtn",
+      onPressed: () => Navigator.pop(context),
+      child: const Icon(Icons.arrow_back),
+    ),
+  ),
+),
     ],
   ),
 );
   }
+
+ 
 
   @override
 void dispose() {

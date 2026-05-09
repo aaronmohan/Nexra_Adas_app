@@ -5,7 +5,7 @@ class LaneDetectionService {
   double _lastOffset = 0.0;
   DateTime? _lastDepartureTime;
 
-  final double _departureThreshold = 0.25;
+  final double _departureThreshold = 0.15;
   final Duration _cooldown = const Duration(seconds: 2);
 
   // ================= MAIN API =================
@@ -25,16 +25,23 @@ class LaneDetectionService {
 
       // Sample every 4 pixels for performance
       for (int y = startY; y < height; y += 4) {
-        for (int x = 0; x < width; x += 4) {
+          for (int x = (width * 0.2).toInt(); x < (width * 0.8).toInt(); x += 4) {
           final index = y * width + x;
           if (index >= bytes.length) continue;
 
           final pixel = bytes[index];
 
           // Bright pixel threshold (detect white lines)
-          if (pixel > 200) {
-            lanePixelCount++;
-            weightedXSum += x;
+          if (pixel > 200 && pixel < 255) {
+
+            // Check neighbor pixel (simple edge check)
+            final rightIndex = y * width + (x + 2 < width ? x + 2 : x);
+            final rightPixel = bytes[rightIndex];
+
+            if ((pixel - rightPixel).abs() > 15) {
+              lanePixelCount++;
+              weightedXSum += x;
+            }
           }
         }
       }
@@ -47,9 +54,12 @@ class LaneDetectionService {
 
       final avgX = weightedXSum / lanePixelCount;
 
-      // Normalize offset (-1 to +1)
-      final normalizedOffset =
-          (avgX / (width - 1)) * 2 - 1;
+      final rawOffset =
+    (avgX / (width - 1)) * 2 - 1;
+
+        // Smooth using previous value
+        final normalizedOffset =
+            (_lastOffset * 0.7) + (rawOffset * 0.3);
 
       _detectDeparture(normalizedOffset);
 

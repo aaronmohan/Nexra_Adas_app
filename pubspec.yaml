@@ -48,6 +48,7 @@ dependencies:
   geolocator: ^14.0.2
   
   
+
   # Local storage
   shared_preferences: ^2.2.2
   sqflite: ^2.3.0
@@ -86,7 +87,7 @@ flutter:
   #icons
   uses-material-design: true
   assets:
-    - assets/ml_models/yolov8s_int8.tflite
+    - assets/ml_models/
     - assets/sounds/
     - assets/labels/
 
