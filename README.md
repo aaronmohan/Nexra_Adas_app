@@ -92,7 +92,7 @@ NEXRA scans the roadside for traffic signs using a custom model trained on the w
 
 ---
 
-## 🗂️ Modular File Structure (Exam-Ready)
+## 🗂️ Modular File Structure
 
 NEXRA follows a highly modular, service-oriented architecture:
 
@@ -102,7 +102,6 @@ adas_app/
 │   ├── ml_models/               # Deep learning brains (.tflite format)
 │   │   ├── yolov8n.tflite       # Forward collision detector
 │   │   ├── traffic_signs.tflite # GTSRB-trained sign classifier
-│   │   ├── pothole_detection.tflite # Pothole surface classifier
 │   │   └── drowsiness.tflite    # Driver drowsiness checker
 │   ├── labels/                  # Mapping file output -> readable labels
 │   │   ├── labels.txt
@@ -118,7 +117,6 @@ adas_app/
 │   │   ├── collision_logic_service.dart     # Decision maker for crash risks
 │   │   ├── collision_warning_service.dart   # Auditory buzzer trigger services
 │   │   ├── traffic_sign_service.dart        # GTSRB sign classification logic
-│   │   ├── pothole_detection_service.dart   # Potholes GPS crowdsource logger
 │   │   └── trip_service.dart                # Diagnostics logger (SQLite database)
 │   ├── screens/                 # UI Screen Interfaces
 │   │   ├── adas_camera_screen.dart          # Main active camera processing UI
