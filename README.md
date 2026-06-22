@@ -7,6 +7,12 @@
 
 **NEXRA ADAS** is a highly efficient, on-device mobile **Advanced Driver Assistance System** built using **Flutter**. Designed to run smoothly on standard smartphones, NEXRA utilizes live camera streams, real-time edge processing, custom pixel-level computer vision, and optimized deep learning models to actively assist drivers, enhance road safety, and track trip diagnostics.
 
+<p align="center">
+  <img src="assets/readme_images/home.jpg" alt="NEXRA ADAS Dashboard Home Screen" width="300" />
+  <br>
+  <em>Figure 1: NEXRA ADAS Dashboard Home Screen UI</em>
+</p>
+
 ---
 
 ## ⚙️ Tech Stack (Easy Explanation)
@@ -54,6 +60,13 @@ graph TD
 
 ### 1. 🛣️ Lane Detection (Pure Dart Implementation)
 Unlike standard apps that rely on heavy external libraries like OpenCV, NEXRA implements lane detection **manually in pure Dart** by processing raw image frame pixels.
+
+<p align="center">
+  <img src="assets/readme_images/correct_lane.jpg" alt="Correct Lane Detection" width="350" />
+  <img src="assets/readme_images/departed_lane.jpg" alt="Departed Lane Warning" width="350" />
+  <br>
+  <em>Figure 2: Real-time Lane Detection (Left: In-lane tracking | Right: Lane Departure Warning Alert)</em>
+</p>
 
 *   **Grayscale Conversion**: Pixels are converted to grayscale using the standard luminance formula:
     $$\text{Grayscale} = 0.3R + 0.59G + 0.11B$$
